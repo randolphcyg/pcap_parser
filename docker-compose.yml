@@ -1,0 +1,6 @@
+version: '3'
+services:
+  pkt_parser:
+    image: pcap_parser:1.0
+    deploy:
+      replicas: 6
