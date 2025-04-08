@@ -3,7 +3,8 @@ pcap_parser 基于 libwireshark 的离线pcap流量包解析，提供http接口
 docker部署
 ```shell
 docker pull ubuntu:22.04 --platform linux/amd64
-docker pull golang:1.24.1 --platform linux/amd64
+docker pull golang:1.24.2 --platform linux/amd64
+docker tag golang:1.24.2 golang:1.24-u22
 
 # 构建
 sudo docker build -t pcap_parser:1.0 . --platform linux/amd64
