@@ -13,29 +13,29 @@ import (
 
 // AnalyzeReq 分析接口请求体
 type AnalyzeReq struct {
-	TaskID       string `json:"task_id"`
-	UUID         string `json:"uuid"`
-	PcapFilePath string `json:"pcap_file_path"`
-	Filter       string `json:"filter"`
-	Page         int    `json:"page"`
-	Size         int    `json:"size"`
+	TaskID   string `json:"taskID"`
+	UUID     string `json:"uuid"`
+	PcapPath string `json:"pcapPath"`
+	Filter   string `json:"filter"`
+	Page     int    `json:"page"`
+	Size     int    `json:"size"`
 }
 
 // AnalyzeResp 分析接口响应体
 type AnalyzeResp struct {
-	TaskID       string   `json:"task_id"`
-	UUID         string   `json:"uuid"`
-	PcapFilePath string   `json:"pcap_file_path"`
-	StartTime    string   `json:"start_time"`  // 任务开始时间
-	FinishTime   string   `json:"finish_time"` // 任务结束时间
-	Frames       []string `json:"frames"`      // 结果
+	TaskID     string   `json:"taskID"`
+	UUID       string   `json:"uuid"`
+	PcapPath   string   `json:"pcapPath"`
+	StartTime  string   `json:"startTime"`  // 任务开始时间
+	FinishTime string   `json:"finishTime"` // 任务结束时间
+	Frames     []string `json:"frames"`     // 结果
 }
 
 func validateAnalyzeReq(req AnalyzeReq) error {
-	if req.PcapFilePath == "" {
+	if req.PcapPath == "" {
 		return errors.New("PCAP file path is required")
 	}
-	if !isFileExist(req.PcapFilePath) {
+	if !isFileExist(req.PcapPath) {
 		return errors.New("PCAP file does not exist")
 	}
 	return nil
@@ -43,7 +43,7 @@ func validateAnalyzeReq(req AnalyzeReq) error {
 
 // 执行 Wireshark 分析
 func runWiresharkAnalysis(req AnalyzeReq) (frames []string, err error) {
-	frames, err = pcap_parser.GetAllFrames(req.PcapFilePath, req.Filter, req.Page, req.Size, pcap_parser.WithDebug(false), pcap_parser.IgnoreError(false))
+	frames, err = pcap_parser.GetAllFrames(req.PcapPath, req.Filter, req.Page, req.Size, pcap_parser.WithDebug(false), pcap_parser.IgnoreError(false))
 	if err != nil {
 		return nil, err
 	}
@@ -74,17 +74,17 @@ func handleWiresharkAnalysis(c *gin.Context) {
 
 	var resp AnalyzeResp
 	resp = AnalyzeResp{
-		TaskID:       req.TaskID,
-		UUID:         req.UUID,
-		PcapFilePath: req.PcapFilePath,
-		StartTime:    begin.Format(time.RFC3339),
-		FinishTime:   end.Format(time.RFC3339),
-		Frames:       frames,
+		TaskID:     req.TaskID,
+		UUID:       req.UUID,
+		PcapPath:   req.PcapPath,
+		StartTime:  begin.Format(time.RFC3339),
+		FinishTime: end.Format(time.RFC3339),
+		Frames:     frames,
 	}
 	slog.Info("wireshark analysis succeeded",
-		"pcap_file", req.PcapFilePath,
+		"pcapPath", req.PcapPath,
 		"uuid", req.UUID,
-		"task_id", req.TaskID,
+		"taskID", req.TaskID,
 		"StartTime", time.Now().Format(time.RFC3339),
 		"FinishTime", time.Now().Format(time.RFC3339),
 	)
