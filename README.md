@@ -25,7 +25,7 @@ docker run -d \
 curl -X POST \
   -H "Content-Type: application/json" \
   -d '{
-    "pcap_file_path": "/opt/pcap_parser/pcaps/sshguess.pcap",
+    "pcapPath": "/opt/pcap_parser/pcaps/sshguess.pcap",
     "uuid": "d3db5f67-c441-56a4-9591-c30c3abab24f",
     "task_id": "2333",
     "filter": "",
