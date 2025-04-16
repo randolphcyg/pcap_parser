@@ -16,12 +16,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
-	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/gopacket/pcapgo"
 	"github.com/pkg/errors"
 )
 
@@ -76,61 +75,6 @@ func initCapFile(path string, opts ...Option) (conf *Conf, err error) {
 	return
 }
 
-// HexData hex data
-type HexData struct {
-	Offset []string `json:"offset"`
-	Hex    []string `json:"hex"`
-	Ascii  []string `json:"ascii"`
-}
-
-// ParseHexData
-//
-// @Description: Unmarshal hex data dissect result into a structured format.
-// @param src: JSON string representing the hex data.
-// @return hexData: Parsed hex data.
-func ParseHexData(src string) (hexData *HexData, err error) {
-	err = json.Unmarshal([]byte(src), &hexData)
-	if err != nil {
-		return nil, err
-	}
-
-	return hexData, nil
-}
-
-// GetHexDataByIdx
-//
-// @Description: Retrieve and parse hex data for a specific frame by its index.
-// @param path: Path to the pcap file.
-// @param frameIdx: The index of the frame to retrieve hex data for (1-based index).
-// @param opts: Optional configuration for dissection.
-// @return hexData: Parsed hex data of the specified frame.
-func GetHexDataByIdx(path string, frameIdx int, opts ...Option) (hexData *HexData, err error) {
-	EpanMutex.Lock()
-	defer EpanMutex.Unlock()
-
-	_, err = initCapFile(path, opts...)
-	if err != nil {
-		return
-	}
-
-	// get specific frame hex data in json format by c
-	srcHex := C.get_specific_frame_hex_data(C.int(frameIdx))
-	if srcHex != nil {
-		if C.strlen(srcHex) == 0 { // loop ends
-			return
-		}
-	}
-
-	// unmarshal dissect result
-	hexData, err = ParseHexData(CChar2GoStr(srcHex))
-	if err != nil {
-		slog.Warn("ParseHexData:", "ParseFrameData", err)
-		return
-	}
-
-	return
-}
-
 // ParseFrameData
 //
 // @Description: Unmarshal and prrocess frame data concurrently, including parsing multiple network layers.
@@ -146,181 +90,58 @@ func ParseFrameData(src string) (frame *FrameData, err error) {
 		return nil, ErrParseDissectRes
 	}
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var layerErrors []error
-
-	// parseAndSetLayer parses a network layer and sets the result in the frame data.
-	parseAndSetLayer := func(layerFunc func() (any, error), setLayerFunc func(any)) {
-		defer wg.Done()
-		layer, err := layerFunc()
-		if err != nil && !errors.Is(err, ErrLayerNotFound) { // ignore if layer not found
-			layerErrors = append(layerErrors, err)
-		}
-		if layer != nil {
-			mu.Lock()
-			setLayerFunc(layer) // update BaseLayers
-			mu.Unlock()
-		}
-	}
-
-	wg.Add(7)
-
-	go parseAndSetLayer(frame.Layers.WsCol, func(layer any) {
-		frame.BaseLayers.WsCol = layer.(*WsCol)
-	})
-
-	go parseAndSetLayer(frame.Layers.Frame, func(layer any) {
-		frame.BaseLayers.Frame = layer.(*Frame)
-	})
-
-	go parseAndSetLayer(frame.Layers.Ip, func(layer any) {
-		frame.BaseLayers.Ip = layer.(*Ip)
-	})
-
-	go parseAndSetLayer(frame.Layers.Udp, func(layer any) {
-		frame.BaseLayers.Udp = layer.(*Udp)
-	})
-
-	go parseAndSetLayer(frame.Layers.Tcp, func(layer any) {
-		frame.BaseLayers.Tcp = layer.(*Tcp)
-	})
-
-	go parseAndSetLayer(frame.Layers.Http, func(layer any) {
-		frame.BaseLayers.Http = layer.([]*Http)
-	})
-
-	go parseAndSetLayer(frame.Layers.Dns, func(layer any) {
-		frame.BaseLayers.Dns = layer.(*Dns)
-	})
-
-	wg.Wait()
-
-	// Summarize all errors of a frame
-	if len(layerErrors) > 0 {
-		return frame, errors.Errorf("frame:%d:%v", frame.BaseLayers.Frame.Number, layerErrors)
-	}
-
 	return frame, nil
 }
 
-// GetFrameByIdx
-//
-// @Description: Dissect a specific frame of the pcap file by its index and return the JSON result.
-// @param path: Path to the pcap file.
-// @param frameIdx: The index of the frame to be dissected (1-based index).
-// @param opts: Optional configuration for dissection.
-// @return frameData: JSON dissect result of the specified frame.
-func GetFrameByIdx(path string, frameIdx int, opts ...Option) (frameData *FrameData, err error) {
-	EpanMutex.Lock()
-	defer EpanMutex.Unlock()
+type FrameData struct {
+	Index  string `json:"_index"`
+	Layers any    `json:"layers"` // source
+}
 
-	conf, err := initCapFile(path, opts...)
+// CountFramesInPCAP 函数用于统计 PCAP 文件中的帧数
+func CountFramesInPCAP(filePath string) (int, error) {
+	// 打开指定的 PCAP 文件
+	file, err := os.Open(filePath)
 	if err != nil {
-		return
+		return 0, err
+	}
+	// 确保在函数结束时关闭文件
+	defer file.Close()
+
+	// 创建一个新的 PCAP 读取器
+	reader, err := pcapgo.NewReader(file)
+	if err != nil {
+		return 0, err
 	}
 
-	printCJson := 0
-	if conf.PrintCJson {
-		printCJson = 1
-	}
-
-	counter := 0
+	frameCount := 0
+	// 循环读取数据包
 	for {
-		counter++
-		if counter < frameIdx && frameIdx != counter {
-			continue
-		}
-
-		// get proto dissect result in json format by c
-		srcFrame := C.proto_tree_in_json(C.int(counter), C.int(printCJson))
-		if srcFrame != nil {
-			if C.strlen(srcFrame) == 0 {
-				return frameData, ErrFrameIsBlank
-			}
-		}
-
-		// unmarshal dissect result
-		frameData, err = ParseFrameData(CChar2GoStr(srcFrame))
+		_, _, err := reader.ReadPacketData()
 		if err != nil {
-			slog.Warn("GetFrameByIdx:", "ParseFrameData", err)
-			return
+			break
 		}
-
-		return
-	}
-}
-
-func removeNegativeAndZero(nums []int) []int {
-	var result []int
-	for _, num := range nums {
-		if num > 0 {
-			result = append(result, num)
-		}
-	}
-	return result
-}
-
-// GetFramesByIdxs
-//
-//	@Description: Dissect specific frames of the pcap file and return JSON results.
-//	@param path: Pcap file path
-//	@param frameIdxs: The frame numbers to be extracted
-//	@return frames: JSON dissect results of the specified frames
-func GetFramesByIdxs(path string, frameIdxs []int, opts ...Option) (frames []*FrameData, err error) {
-	EpanMutex.Lock()
-	defer EpanMutex.Unlock()
-
-	conf, err := initCapFile(path, opts...)
-	if err != nil {
-		return
+		frameCount++
 	}
 
-	printCJson := 0
-	if conf.PrintCJson {
-		printCJson = 1
-	}
-
-	frameIdxs = removeNegativeAndZero(frameIdxs)
-	// Must sort from smallest to largest
-	slices.Sort(frameIdxs)
-
-	for _, idx := range frameIdxs {
-		// get proto dissect result in json format by c
-		srcFrame := C.proto_tree_in_json(C.int(idx), C.int(printCJson))
-		if srcFrame != nil {
-			if C.strlen(srcFrame) == 0 {
-				continue
-			}
-		}
-
-		// unmarshal dissect result
-		frame, err := ParseFrameData(CChar2GoStr(srcFrame))
-		if err != nil {
-			slog.Warn("GetFramesByIdxs:", "ParseFrameData", err)
-		}
-
-		frames = append(frames, frame)
-	}
-
-	return
+	return frameCount, nil
 }
 
 // GetAllFrames
 //
 //	@Description: Dissect all frames of the pcap file and return JSON results.
 //	@param path: Pcap file path
-//	@param key: 用来模糊匹配
 //	@param page: 页数
 //	@param size: 返回的数量上限
 //	@return frames: JSON dissect results of all frames
-func GetAllFrames(path string, key string, page, size int, opts ...Option) (frames []string, err error) {
+func GetAllFrames(path string, page, size int, opts ...Option) (frames []FrameData, total int, err error) {
+	total, _ = CountFramesInPCAP(path)
 	EpanMutex.Lock()
 	defer EpanMutex.Unlock()
-	conf, err := initCapFile(path, opts...)
 
+	conf, err := initCapFile(path, opts...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	printCJson := 0
@@ -329,51 +150,44 @@ func GetAllFrames(path string, key string, page, size int, opts ...Option) (fram
 	}
 
 	start := time.Now()
-	frameChannel := make(chan string, 100)
+	frameChannel := make(chan *FrameData, 100)
 
+	offset := (page - 1) * size
 	// call C function
 	go func() {
 		defer close(frameChannel)
-		totalCnt := 1
-		validCnt := 0
-		offset := (page - 1) * size
+		pageCnt := 0            // 用于分页计数，重命名为更准确的名称
+		currentOffset := offset // 保持 offset 作为固定的起始偏移量
 
-		for {
-			srcFrame := C.proto_tree_in_json(C.int(totalCnt), C.int(printCJson))
-			if srcFrame == nil || C.strlen(srcFrame) == 0 { // end
+		for pageCnt < size {
+			srcFrame := C.proto_tree_in_json(C.int(currentOffset), C.int(printCJson))
+			if srcFrame == nil || C.strlen(srcFrame) == 0 {
+				slog.Info("proto_tree_in_json 返回空结果", "offset", currentOffset)
 				break
 			}
 
-			totalCnt++
+			currentOffset++
 			parseFrame := CChar2GoStr(srcFrame)
 
-			// 过滤不符合key的记录
-			if key != "" && !strings.Contains(parseFrame, key) {
+			parseFrameData, err := ParseFrameData(parseFrame)
+			if err != nil {
+				slog.Info("解析数据包出错", "内容", parseFrame, "错误", err)
 				continue
 			}
 
-			// 分页筛选
-			if validCnt < offset {
-				validCnt++
-				continue
-			}
-
-			if validCnt >= offset+size {
-				break
-			}
-
-			frameChannel <- parseFrame
-			validCnt++
+			frameChannel <- parseFrameData
+			pageCnt++
+			//slog.Info("计数器", "当前计数", currentOffset, "有效计数", pageCnt)
 		}
 	}()
 
 	for frame := range frameChannel {
-		frames = append(frames, frame)
+		frames = append(frames, *frame)
 	}
 
 	if conf.Debug {
 		slog.Info("Dissect end:", "ELAPSED", time.Since(start), "PCAP_FILE", path)
 	}
 
-	return frames, nil
+	return frames, total, nil
 }

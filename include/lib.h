@@ -32,4 +32,4 @@ bool get_hex_data(epan_dissect_t *edt, cJSON *cjson_offset, cJSON *cjson_hex,
 // Dissect and get hex data of specific frame
 char *get_specific_frame_hex_data(int num);
 // Get proto tree in json format
-char *proto_tree_in_json(int num, int printCJson);
+char *proto_tree_in_json(int offset, int printCJson);

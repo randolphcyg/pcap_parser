@@ -23,12 +23,13 @@ type AnalyzeReq struct {
 
 // AnalyzeResp 分析接口响应体
 type AnalyzeResp struct {
-	TaskID     string   `json:"taskID"`
-	UUID       string   `json:"uuid"`
-	PcapPath   string   `json:"pcapPath"`
-	StartTime  string   `json:"startTime"`  // 任务开始时间
-	FinishTime string   `json:"finishTime"` // 任务结束时间
-	Frames     []string `json:"frames"`     // 结果
+	TaskID     string                  `json:"taskID"`
+	UUID       string                  `json:"uuid"`
+	PcapPath   string                  `json:"pcapPath"`
+	StartTime  string                  `json:"startTime"`  // 任务开始时间
+	FinishTime string                  `json:"finishTime"` // 任务结束时间
+	Frames     []pcap_parser.FrameData `json:"frames"`     // 结果
+	Total      int                     `json:"total"`      // 总数
 }
 
 func validateAnalyzeReq(req AnalyzeReq) error {
@@ -42,13 +43,13 @@ func validateAnalyzeReq(req AnalyzeReq) error {
 }
 
 // 执行 Wireshark 分析
-func runWiresharkAnalysis(req AnalyzeReq) (frames []string, err error) {
-	frames, err = pcap_parser.GetAllFrames(req.PcapPath, req.Filter, req.Page, req.Size, pcap_parser.WithDebug(false), pcap_parser.IgnoreError(false))
+func runWiresharkAnalysis(req AnalyzeReq) (frames []pcap_parser.FrameData, total int, err error) {
+	frames, total, err = pcap_parser.GetAllFrames(req.PcapPath, req.Page, req.Size, pcap_parser.WithDebug(false), pcap_parser.IgnoreError(false))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return frames, nil
+	return frames, total, nil
 }
 
 func handleWiresharkAnalysis(c *gin.Context) {
@@ -64,7 +65,7 @@ func handleWiresharkAnalysis(c *gin.Context) {
 
 	begin := time.Now()
 
-	frames, err := runWiresharkAnalysis(req)
+	frames, total, err := runWiresharkAnalysis(req)
 	if err != nil {
 		HandleError(c, http.StatusInternalServerError, "调用错误", err)
 		return
@@ -80,6 +81,7 @@ func handleWiresharkAnalysis(c *gin.Context) {
 		StartTime:  begin.Format(time.RFC3339),
 		FinishTime: end.Format(time.RFC3339),
 		Frames:     frames,
+		Total:      total,
 	}
 	slog.Info("wireshark analysis succeeded",
 		"pcapPath", req.PcapPath,
@@ -87,6 +89,7 @@ func handleWiresharkAnalysis(c *gin.Context) {
 		"taskID", req.TaskID,
 		"StartTime", time.Now().Format(time.RFC3339),
 		"FinishTime", time.Now().Format(time.RFC3339),
+		"total", total,
 	)
 	Success(c, resp)
 }
@@ -101,7 +104,7 @@ func main() {
 	}
 
 	// 启动服务
-	if err := r.Run(":8090"); err != nil {
+	if err := r.Run(":8097"); err != nil {
 		slog.Error("Failed to start server", "error", err)
 		os.Exit(1)
 	}

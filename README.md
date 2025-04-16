@@ -27,10 +27,9 @@ curl -X POST \
   -d '{
     "pcapPath": "/opt/pcap_parser/pcaps/sshguess.pcap",
     "uuid": "d3db5f67-c441-56a4-9591-c30c3abab24f",
-    "task_id": "2333",
-    "filter": "",
+    "taskID": "2333",
     "page": 1,
-    "size": 20
+    "size": 10
   }' \
   http://localhost:8090/api/v1/analyze
   

@@ -1,9 +1,19 @@
 #include <cJSON.h>
+#include <epan/dfilter/dfilter.h>
 #include <lib.h>
 #include <offline.h>
 
 // global capture file variable
 capture_file cf;
+
+// 定义辅助结构体
+typedef struct {
+  dfilter_t *compiled_filter;
+  int is_filter_initialized;
+} filter_info_t;
+
+// 全局辅助结构体变量
+filter_info_t filter_info;
 
 static guint hexdump_source_option =
     HEXDUMP_SOURCE_MULTI; /* Default - Enable legacy multi-source mode */
@@ -521,14 +531,16 @@ char *get_specific_frame_hex_data(int num) {
  *  @param num the index of frame which you want to dissect
  *  @return char of protocol tree dissect result
  */
-char *proto_tree_in_json(int num, int printCJson) {
+char *proto_tree_in_json(int offset, int printCJson) {
   epan_dissect_t *edt;
+  int processedCount = 0; // 用于记录已经处理的数据包数量
 
-  // start reading packets
+  // 从 offset 之后开始读取数据包
   while (read_packet(&edt)) {
-    if (num != cf.count) {
+    if (offset > 0 && processedCount < offset) {
+      // 跳过前面的 offset 个数据包
       epan_dissect_free(edt);
-      edt = NULL;
+      processedCount++;
       continue;
     }
 
@@ -554,6 +566,8 @@ char *proto_tree_in_json(int num, int printCJson) {
     if (printCJson) {
       printf("%s\n", json_str);
     }
+
+    processedCount++;
 
     return json_str ? json_str : g_strdup("");
   }
